@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Sparkles, Plus, Users, MessageSquare, FileText, ArrowUpRight } from 'lucide-react';
+import { Sparkles, Plus, Users, MessageSquare, FileText, ArrowUpRight, Moon, Sun } from 'lucide-react';
 import './style.css';
 
 type Influencer = { id: number; name: string; personality: string; interests: string; goal: string; status: string };
@@ -11,7 +11,22 @@ async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> 
   if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(typeof error.detail === 'string' ? error.detail : 'Request failed. Check your inputs and try again.'); }
   return response.json();
 }
+type Theme = 'light' | 'dark';
+function initialTheme(): Theme {
+  try {
+    const saved = localStorage.getItem('studio-theme');
+    if (saved === 'light' || saved === 'dark') return saved;
+  } catch { /* Storage is optional. */ }
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+const startingTheme = initialTheme();
+document.documentElement.dataset.theme = startingTheme;
 function App() {
+  const [theme, setTheme] = useState<Theme>(startingTheme);
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem('studio-theme', theme); } catch { /* Keep working without storage. */ }
+  }, [theme]);
   const [items, setItems] = useState<Influencer[]>([]), [selected, setSelected] = useState<number | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]), [tab, setTab] = useState('chat');
   const [form, setForm] = useState(blank), [editing, setEditing] = useState(false);
@@ -36,7 +51,7 @@ function App() {
     catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
   return <div className="layout"><aside><a className="brand" href="/"><Sparkles/> Studio<span>AI</span></a><div className="workspace">YOUR WORKSPACE</div><div className="nav"><Users size={18}/> Influencers <span>{items.length}</span></div><div className="sidebar-bottom"><div className="avatar">S</div><div>Creator workspace<small>Local development</small></div></div></aside>
-    <main><header><span>Workspace <span className="muted">/ Influencers</span></span><span className="pill">Phase 1 · Creator studio</span></header><section className="page"><div className="heading"><div><div className="eyebrow">YOUR CAST, YOUR CREATIVE WORLD</div><h1>Influencer studio<span>.</span></h1><p>Create distinct personalities. Give their stories a place to grow.</p></div><button disabled={busy} onClick={() => {setSelected(null);setEditing(false);setForm(blank);}}><Plus size={17}/> New influencer</button></div>
+    <main><header><span>Workspace <span className="muted">/ Influencers</span></span><div className="header-actions"><span className="pill">Phase 1 · Creator studio</span><button className="theme-toggle" type="button" aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={17}/> : <Moon size={17}/>}<span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span></button></div></header><section className="page"><div className="heading"><div><div className="eyebrow">YOUR CAST, YOUR CREATIVE WORLD</div><h1>Influencer studio<span>.</span></h1><p>Create distinct personalities. Give their stories a place to grow.</p></div><button disabled={busy} onClick={() => {setSelected(null);setEditing(false);setForm(blank);}}><Plus size={17}/> New influencer</button></div>
     <div className="stats"><div><span>YOUR CHARACTERS</span><strong>{items.length.toString().padStart(2,'0')}<Users/></strong></div><div><span>ACTIVE CHARACTERS</span><strong>{items.filter(i => i.status === 'active').length.toString().padStart(2,'0')}<Sparkles/></strong></div><div><span>PUBLISHING</span><strong className="smaller">Drafts only<ArrowUpRight/></strong></div></div>
     {error && <div role="alert" className="error">{error}</div>}
     <div className="section-title"><h2>Your influencers</h2><span>Fictional characters · AI generated</span></div>
