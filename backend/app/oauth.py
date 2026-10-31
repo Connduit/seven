@@ -129,7 +129,8 @@ def setup():
 @router.get('/accounts/connections', dependencies=[Depends(admin)])
 def list_connections(response: Response, session: Session = Depends(db)):
     response.headers['Cache-Control'] = 'no-store'
-    return [public(a) for a in session.scalars(select(LinkedAccount).order_by(LinkedAccount.id))]
+    from .token_refresh import refresh_details
+    return [{**public(a), **refresh_details(a, session)} for a in session.scalars(select(LinkedAccount).order_by(LinkedAccount.id))]
 
 
 @router.post('/influencers/{influencer_id}/connections/{provider}/connect', dependencies=[Depends(admin)])
@@ -228,12 +229,21 @@ async def callback(provider: str, request: Request, session: Session = Depends(d
             if existing and existing.influencer_id != influencer_id:
                 outcome = 'account_already_linked'
             else:
+                if existing and provider == 'google' and not tokens.get('refresh_token'):
+                    try:
+                        previous = json.loads(cipher().decrypt(existing.encrypted_tokens.encode()))
+                        tokens['refresh_token'] = previous.get('refresh_token')
+                    except (InvalidToken, ValueError, TypeError):
+                        pass
                 encrypted = cipher().encrypt(json.dumps(tokens).encode()).decode()
                 if existing:
                     existing.encrypted_tokens, existing.display_name, existing.expires_at, existing.scopes = encrypted, name, expires, scopes
                 else:
                     session.add(LinkedAccount(influencer_id=influencer_id, provider=provider, account_id=account_id,
                                               display_name=name, encrypted_tokens=encrypted, expires_at=expires, scopes=scopes))
+                if existing:
+                    from .token_refresh import RefreshState
+                    session.execute(delete(RefreshState).where(RefreshState.connection_id == existing.id))
                 session.commit()
                 outcome = 'connected'
         except (httpx.HTTPError, KeyError, ValueError, TypeError, IntegrityError):
@@ -251,5 +261,7 @@ def disconnect(account_id: int, session: Session = Depends(db)):
     account = session.get(LinkedAccount, account_id)
     if not account:
         raise HTTPException(404, 'Connected account not found')
+    from .token_refresh import RefreshState
+    session.execute(delete(RefreshState).where(RefreshState.connection_id == account_id))
     session.delete(account)
     session.commit()

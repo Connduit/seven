@@ -198,3 +198,29 @@ def test_setup_identifies_specific_local_configuration_error(client, monkeypatch
     monkeypatch.setenv('TOKEN_ENCRYPTION_KEY', 'not-a-real-key')
     assert 'TOKEN_ENCRYPTION_KEY is not a valid' in google_status()['message']
     assert 'not-a-real-key' not in google_status()['message']
+
+
+def test_google_reauthorization_preserves_existing_offline_grant(client, monkeypatch):
+    client, engine, key = client
+    from app.token_refresh import RefreshState
+    owner = create(client)
+    old_tokens = {'access_token':'old','refresh_token':'existing-offline-grant'}
+    with Session(engine) as session:
+        account = oauth.LinkedAccount(influencer_id=owner,provider='google',account_id='123',display_name='Demo',
+                                      encrypted_tokens=Fernet(key.encode()).encrypt(json.dumps(old_tokens).encode()).decode(),
+                                      expires_at=int(time.time())+3600,scopes='openid email profile')
+        session.add(account); session.commit(); account_id=account.id
+        session.add(RefreshState(connection_id=account_id,status='reconnect_required')); session.commit()
+    async def exchange(*args):
+        return '123','Demo',{'access_token':'new','refresh_token':None},int(time.time())+7200,'openid email profile'
+    monkeypatch.setattr(oauth,'exchange',exchange)
+    state,_,_=start(client,owner,'google')
+    result=client.get('/api/integrations/google/callback',params={'state':state,'code':'code'},follow_redirects=False)
+    assert result.headers['location'].endswith('result=connected')
+    with Session(engine) as session:
+        saved=session.get(oauth.LinkedAccount,account_id)
+        tokens=json.loads(Fernet(key.encode()).decrypt(saved.encrypted_tokens.encode()))
+        assert tokens['refresh_token']=='existing-offline-grant'
+        assert session.get(RefreshState,account_id) is None
+    status=client.get('/api/accounts/connections',headers=HEADERS).json()[0]
+    assert status['automatic_refresh'] is True and status['reconnect_required'] is False

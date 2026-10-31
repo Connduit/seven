@@ -1,4 +1,6 @@
 import os
+import asyncio
+from contextlib import asynccontextmanager, suppress
 from datetime import date, datetime, timezone
 from typing import Literal
 
@@ -54,7 +56,19 @@ class Entry(Base):
 engine = create_engine(os.getenv("DATABASE_URL", "sqlite:///./studio.db"), connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(engine)
 Base.metadata.create_all(engine)
-app = FastAPI(title="AI Influencer Studio", version="0.1.0")
+@asynccontextmanager
+async def lifespan(app):
+    from .token_refresh import refresh_worker
+    task = asyncio.create_task(refresh_worker(SessionLocal))
+    try:
+        yield
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
+app = FastAPI(title="AI Influencer Studio", version="0.1.0", lifespan=lifespan)
 
 
 def db():
@@ -287,6 +301,7 @@ def delete_influencer(influencer_id: int, session: Session = Depends(db), x_stud
     session.execute(delete(SocialPage).where(SocialPage.influencer_id == influencer_id))
     session.execute(delete(InstagramConnection).where(InstagramConnection.influencer_id == influencer_id))
     session.execute(delete(OAuthAttempt).where(OAuthAttempt.influencer_id == influencer_id))
+    session.execute(delete(RefreshState).where(RefreshState.connection_id.in_(select(LinkedAccount.id).where(LinkedAccount.influencer_id == influencer_id))))
     session.execute(delete(LinkedAccount).where(LinkedAccount.influencer_id == influencer_id))
     session.execute(delete(LinkAttempt).where(LinkAttempt.influencer_id == influencer_id))
     for account in session.scalars(select(VaultAccount).where(VaultAccount.influencer_id == influencer_id)):
@@ -331,3 +346,7 @@ async def credential_response_headers(request, call_next):
 from .oauth import router as oauth_router, LinkedAccount, LinkAttempt
 Base.metadata.create_all(engine)
 app.include_router(oauth_router)
+
+
+from .token_refresh import RefreshState
+Base.metadata.create_all(engine)
