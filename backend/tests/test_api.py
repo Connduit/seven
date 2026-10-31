@@ -276,3 +276,54 @@ def test_vault_validation_redaction_and_wrong_key(client, monkeypatch, instagram
     assert 'private-password' not in response.text
     monkeypatch.delenv('TOKEN_ENCRYPTION_KEY')
     assert client.get(base, headers=instagram_config).status_code == 503
+
+
+def test_persona_biography_roundtrip_and_validation(client):
+    from datetime import date, timedelta
+    from app.main import Biography
+    payload = dict(name='Maya', personality='Curious', interests='Travel', goal='Create', biography={
+        'birthdate':'1998-06-12', 'birthplace':'Portland, Oregon', 'current_location':'Lisbon, Portugal',
+        'pronouns':'she/her', 'occupation':'Photographer', 'background':'Grew up near the coast.',
+        'appearance':'Brown eyes and curly black hair.'})
+    response = client.post('/api/influencers', json=payload)
+    assert response.status_code == 201
+    item = response.json()
+    assert item['biography'] == payload['biography']
+    other = create(client, 'Jake')
+    assert other['biography']['birthdate'] is None
+    # Separate request/database session proves persistence and influencer isolation.
+    listed = client.get('/api/influencers').json()
+    assert listed[0]['biography']['birthplace'] == 'Portland, Oregon'
+    assert listed[1]['biography']['birthplace'] == ''
+    url = f"/api/influencers/{item['id']}"
+    updated = {**payload, 'biography':{**payload['biography'], 'current_location':'Porto, Portugal'}}
+    assert client.put(url, json=updated).json()['biography']['current_location'] == 'Porto, Portugal'
+    # Older clients that omit biography must not erase it.
+    assert client.put(url, json={key:value for key,value in payload.items() if key!='biography'}).json()['biography']['birthplace'] == 'Portland, Oregon'
+    for birthday in [(date.today()+timedelta(days=1)).isoformat(), '1998-02-30', 'not-a-date']:
+        assert client.put(url, json={**payload, 'biography':{'birthdate':birthday}}).status_code == 422
+    assert client.put(url, json={**payload, 'biography':{'birthdate':None}}).json()['biography']['birthdate'] is None
+    assert client.delete(url).status_code == 204
+    for session in main.app.dependency_overrides[main.db]():
+        assert session.get(Biography, item['id']) is None
+
+
+def test_legacy_database_keeps_personas_when_biography_table_is_added(client, tmp_path):
+    from sqlalchemy import text
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy.db'}", connect_args={'check_same_thread':False})
+    with engine.begin() as conn:
+        conn.execute(text('CREATE TABLE influencers (id INTEGER PRIMARY KEY, name VARCHAR(100) NOT NULL, personality TEXT NOT NULL, interests TEXT NOT NULL, goal TEXT NOT NULL, status VARCHAR NOT NULL)'))
+        conn.execute(text("INSERT INTO influencers VALUES (1,'Legacy','Curious','Art','Create','paused')"))
+    main.Base.metadata.create_all(engine)
+    def legacy_db():
+        with main.Session(engine) as session:
+            yield session
+    main.app.dependency_overrides[main.db] = legacy_db
+    result = client.get('/api/influencers')
+    assert result.status_code == 200
+    assert result.json()[0]['name'] == 'Legacy'
+    assert result.json()[0]['biography']['birthdate'] is None
+    edited = result.json()[0]
+    edited['biography']['birthplace'] = 'Seattle'
+    assert client.put('/api/influencers/1', json=edited).json()['biography']['birthplace'] == 'Seattle'
+    engine.dispose()

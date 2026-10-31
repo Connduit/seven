@@ -17,7 +17,7 @@ def test_character_context_sent_to_shared_model_without_cross_persona_leaks(monk
         return httpx.Response(200, json={'choices': [{'message': {'content': 'A quiet beach sounds like my kind of weekend.'}}]})
     real_client = httpx.AsyncClient
     monkeypatch.setattr(main.httpx, 'AsyncClient', lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs))
-    maya = SimpleNamespace(name='Maya', personality='Thoughtful', interests='Art', goal='Create')
+    maya = SimpleNamespace(name='Maya', personality='Thoughtful', interests='Art', goal='Create', biography={'birthdate':'1998-06-12','birthplace':'Portland','background':'Grew up near the coast.'})
     jake = SimpleNamespace(name='Jake', personality='Competitive', interests='Cars', goal='Build community')
     messages = [{'role':'user', 'content':'What would you like to do this weekend?'}]
     assert asyncio.run(main.generate(maya, messages)) == 'A quiet beach sounds like my kind of weekend.'
@@ -27,6 +27,9 @@ def test_character_context_sent_to_shared_model_without_cross_persona_leaks(monk
     second = requests[1]['messages'][0]['content']
     assert '"name": "Maya"' in first and '"name": "Jake"' not in first
     assert '"name": "Jake"' in second and '"name": "Maya"' not in second
+    assert '"birthdate": "1998-06-12"' in first
+    assert '"birthplace": "Portland"' in first
+    assert '"birthplace": "Portland"' not in second
     assert requests[0]['messages'][1:] == messages
     assert messages == [{'role':'user', 'content':'What would you like to do this weekend?'}]
     # Identity transparency and draft/action boundaries must travel with every persona request.

@@ -1,13 +1,13 @@
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Literal
 
 import httpx
 from .prompts import character_instructions
 from fastapi import FastAPI, Depends, HTTPException, Header
-from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import create_engine, ForeignKey, String, Text, select
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import create_engine, ForeignKey, String, Text, Date, select
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session, relationship
 
 
 class Base(DeclarativeBase):
@@ -22,6 +22,23 @@ class Influencer(Base):
     interests: Mapped[str] = mapped_column(Text)
     goal: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(default="paused")
+    biography_record: Mapped["Biography"] = relationship("Biography", cascade="all, delete-orphan", uselist=False)
+
+    @property
+    def biography(self):
+        return self.biography_record or {}
+
+
+class Biography(Base):
+    __tablename__ = "persona_biographies"
+    influencer_id: Mapped[int] = mapped_column(ForeignKey("influencers.id"), primary_key=True)
+    birthdate: Mapped[date | None] = mapped_column(Date, nullable=True)
+    birthplace: Mapped[str] = mapped_column(default="")
+    current_location: Mapped[str] = mapped_column(default="")
+    pronouns: Mapped[str] = mapped_column(default="")
+    occupation: Mapped[str] = mapped_column(default="")
+    background: Mapped[str] = mapped_column(Text, default="")
+    appearance: Mapped[str] = mapped_column(Text, default="")
 
 
 class Entry(Base):
@@ -45,6 +62,24 @@ def db():
         yield session
 
 
+class BiographyInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, from_attributes=True)
+    birthdate: date | None = None
+    birthplace: str = Field(default="", max_length=200)
+    current_location: str = Field(default="", max_length=200)
+    pronouns: str = Field(default="", max_length=100)
+    occupation: str = Field(default="", max_length=200)
+    background: str = Field(default="", max_length=10000)
+    appearance: str = Field(default="", max_length=3000)
+
+    @field_validator('birthdate')
+    @classmethod
+    def valid_birthdate(cls, value):
+        if value and value > date.today():
+            raise ValueError('Birthdate cannot be in the future')
+        return value
+
+
 class InfluencerInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
     name: str = Field(min_length=1, max_length=100)
@@ -52,6 +87,7 @@ class InfluencerInput(BaseModel):
     interests: str = Field(min_length=1, max_length=10000)
     goal: str = Field(min_length=1, max_length=10000)
     status: Literal["paused", "active", "archived"] = "paused"
+    biography: BiographyInput = Field(default_factory=BiographyInput)
 
 
 class InfluencerOutput(InfluencerInput):
@@ -115,7 +151,8 @@ def list_influencers(session: Session = Depends(db)):
 
 @app.post("/api/influencers", response_model=InfluencerOutput, status_code=201)
 def create(payload: InfluencerInput, session: Session = Depends(db)):
-    item = Influencer(**payload.model_dump())
+    item = Influencer(**payload.model_dump(exclude={"biography"}))
+    item.biography_record = Biography(**payload.biography.model_dump())
     session.add(item)
     session.commit()
     session.refresh(item)
@@ -125,8 +162,14 @@ def create(payload: InfluencerInput, session: Session = Depends(db)):
 @app.put("/api/influencers/{influencer_id}", response_model=InfluencerOutput)
 def update(influencer_id: int, payload: InfluencerInput, session: Session = Depends(db)):
     item = find(session, influencer_id)
-    for key, value in payload.model_dump().items():
+    for key, value in payload.model_dump(exclude={"biography"}).items():
         setattr(item, key, value)
+    if 'biography' in payload.model_fields_set:
+        if item.biography_record is None:
+            item.biography_record = Biography(**payload.biography.model_dump())
+        else:
+            for key, value in payload.biography.model_dump().items():
+                setattr(item.biography_record, key, value)
     session.commit()
     session.refresh(item)
     return item
