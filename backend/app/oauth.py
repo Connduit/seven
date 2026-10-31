@@ -75,19 +75,26 @@ def provider_config(provider):
         raise HTTPException(503, 'Set ' + ', '.join(missing))
     try:
         Fernet(os.environ['TOKEN_ENCRYPTION_KEY'].encode())
+    except (ValueError, TypeError):
+        raise HTTPException(503, 'TOKEN_ENCRYPTION_KEY is not a valid Fernet key. Use the original generated encryption key; do not replace an existing key just to reconnect.')
+    if len(os.environ['STUDIO_ADMIN_KEY']) < 32:
+        raise HTTPException(503, 'STUDIO_ADMIN_KEY must contain at least 32 characters.')
+    try:
         redirect = urlsplit(os.environ[f'{prefix}_REDIRECT_URI'])
         frontend = urlsplit(os.getenv('STUDIO_FRONTEND_URL', 'http://localhost:5173'))
-        local_google = provider == 'google' and redirect.scheme == 'http' and redirect.hostname in ('localhost', '127.0.0.1')
-        if (redirect.scheme != 'https' and not local_google) or not redirect.hostname or redirect.username or redirect.password or redirect.query or redirect.fragment:
-            raise ValueError()
-        if redirect.path != f'/api/integrations/{provider}/callback':
-            raise ValueError()
-        if (frontend.scheme, frontend.netloc) != (redirect.scheme, redirect.netloc) or frontend.username or frontend.query or frontend.fragment or frontend.path not in ('', '/'):
-            raise ValueError()
-        if len(os.environ['STUDIO_ADMIN_KEY']) < 32:
-            raise ValueError()
-    except (ValueError, TypeError):
-        raise HTTPException(503, 'Check the encryption/admin keys and callback URL. Dashboard and callback must share one origin. HTTPS is required except Google on localhost.')
+        # Access hostname/port to validate malformed URLs without printing their contents.
+        redirect.hostname, redirect.port, frontend.hostname, frontend.port
+    except ValueError:
+        raise HTTPException(503, f'{prefix}_REDIRECT_URI or STUDIO_FRONTEND_URL is not a valid URL.')
+    local_google = provider == 'google' and redirect.scheme == 'http' and redirect.hostname in ('localhost', '127.0.0.1')
+    if (redirect.scheme != 'https' and not local_google) or not redirect.hostname or redirect.username or redirect.password or redirect.query or redirect.fragment:
+        raise HTTPException(503, f'{prefix}_REDIRECT_URI must be an HTTPS callback URL without credentials, query, or fragment. Google also permits http://localhost:5173 for local development.')
+    if redirect.path != f'/api/integrations/{provider}/callback':
+        raise HTTPException(503, f'{prefix}_REDIRECT_URI must end in /api/integrations/{provider}/callback.')
+    if frontend.username or frontend.password or frontend.query or frontend.fragment or frontend.path not in ('', '/'):
+        raise HTTPException(503, 'STUDIO_FRONTEND_URL must be the dashboard origin only, without a path, query, credentials, or fragment.')
+    if (frontend.scheme, frontend.netloc) != (redirect.scheme, redirect.netloc):
+        raise HTTPException(503, f'STUDIO_FRONTEND_URL and {prefix}_REDIRECT_URI must use the same scheme, hostname, and port. For Google locally, use http://localhost:5173 for both origins; do not mix localhost with 127.0.0.1 or port 8000.')
     return info, {
         'client_id': os.environ[f'{prefix}_CLIENT_ID'], 'client_secret': os.environ[f'{prefix}_CLIENT_SECRET'],
         'redirect_uri': os.environ[f'{prefix}_REDIRECT_URI'], 'secure': not local_google,

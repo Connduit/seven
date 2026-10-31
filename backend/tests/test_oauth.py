@@ -177,3 +177,24 @@ def test_delete_influencer_cleans_tokens_and_pending_attempts(client):
     with Session(engine) as session:
         assert list(session.scalars(select(oauth.LinkedAccount))) == []
         assert list(session.scalars(select(oauth.LinkAttempt))) == []
+
+
+def test_setup_identifies_specific_local_configuration_error(client, monkeypatch):
+    client, _, _ = client
+    def google_status():
+        return next(item for item in client.get('/api/integrations/oauth/setup').json() if item['provider']=='google')
+    monkeypatch.setenv('GOOGLE_REDIRECT_URI', 'http://localhost:5173/api/integrations/google/callback')
+    # Copying an HTTPS placeholder frontend URL must explain the exact mismatch.
+    monkeypatch.setenv('STUDIO_FRONTEND_URL', 'https://your-studio.example')
+    result = google_status()
+    assert result['configured'] is False
+    assert 'same scheme, hostname, and port' in result['message']
+    assert 'test-secret' not in result['message']
+    monkeypatch.setenv('STUDIO_FRONTEND_URL', 'http://localhost:5173')
+    assert google_status()['configured'] is True
+    monkeypatch.setenv('GOOGLE_REDIRECT_URI', 'http://localhost:5173/wrong-path')
+    assert 'must end in /api/integrations/google/callback' in google_status()['message']
+    monkeypatch.setenv('GOOGLE_REDIRECT_URI', 'http://localhost:5173/api/integrations/google/callback')
+    monkeypatch.setenv('TOKEN_ENCRYPTION_KEY', 'not-a-real-key')
+    assert 'TOKEN_ENCRYPTION_KEY is not a valid' in google_status()['message']
+    assert 'not-a-real-key' not in google_status()['message']
