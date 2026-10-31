@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { adminHeaders, setAdminKey } from './admin';
+import { setAdminKey } from './admin';
+import { accountRequest } from './accountRequest';
 import OAuthAccounts from './OAuthAccounts';
 
 type Account = { id: number; label: string; service: string; website: string; influencer_id: number | null };
@@ -16,12 +17,7 @@ export default function AccountVault({ influencers }: { influencers: Influencer[
   const [error, setError] = useState(''), [busy, setBusy] = useState(false);
   async function request<T>(url: string, method = 'GET', body?: unknown): Promise<T> {
     const current = generation.current;
-    const response = await fetch(url, { method, cache: 'no-store', headers: { 'Content-Type': 'application/json', ...adminHeaders() }, body: body ? JSON.stringify(body) : undefined });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(typeof data.detail === 'string' ? data.detail : 'Account request failed.');
-    }
-    const result = response.status === 204 ? undefined as T : await response.json();
+    const result = await accountRequest<T>(url, method, body);
     if (current !== generation.current) throw new Error('Vault locked. Unlock again to continue.');
     return result;
   }
@@ -70,7 +66,7 @@ export default function AccountVault({ influencers }: { influencers: Influencer[
     <div className="heading"><div><div className="eyebrow">YOUR WORKSPACE ACCOUNTS</div><h1>Accounts & vault<span>.</span></h1><p>Manage social connections and saved account credentials in one place.</p></div>{unlocked && <button className="secondary" disabled={busy} onClick={lock}>Lock vault</button>}</div>
     {new URLSearchParams(window.location.search).has('oauth') && <p role="status" className="integration-note">{new URLSearchParams(window.location.search).get('result') === 'connected' ? 'Account connected. Unlock the vault to view it.' : 'Account authorization did not finish. It may have been cancelled, expired, or the account may already belong to another influencer. Unlock and try again.'}</p>}
     {error && <p className="error" role="alert">{error}</p>}
-    {!unlocked ? <div className="panel vault-unlock"><h2>Unlock your account vault</h2><p className="muted">Use your studio administrator key. Passwords stay encrypted in the database; credentials are never included in AI prompts.</p><form onSubmit={unlock}><label>Studio administrator key<input type="password" required autoComplete="off" value={key} onChange={e => setKey(e.target.value)}/></label><button disabled={busy}>{busy ? 'Unlocking…' : 'Unlock vault'}</button></form><small>Requires STUDIO_ADMIN_KEY and TOKEN_ENCRYPTION_KEY on the backend. See the README for setup. Locks after 5 minutes of inactivity. Switching browser tabs keeps the vault unlocked.</small></div> : <>
+    {!unlocked ? <div className="panel vault-unlock"><h2>Unlock your account vault</h2><p className="muted">Use your studio administrator key. Passwords stay encrypted in the database; credentials are never included in AI prompts.</p><form onSubmit={unlock}><label>Studio administrator key<input type="password" required autoComplete="off" value={key} onChange={e => setKey(e.target.value)}/></label><button aria-busy={busy} disabled={busy}>{busy ? 'Unlocking…' : 'Unlock vault'}</button></form><small>Requires STUDIO_ADMIN_KEY and TOKEN_ENCRYPTION_KEY on the backend. See the README for setup. Locks after 5 minutes of inactivity. Switching browser tabs keeps the vault unlocked.</small></div> : <>
       <OAuthAccounts influencers={influencers}/>
       <div className="section-title"><h2>Authorized Instagram accounts</h2><span>Official OAuth connections</span></div>
       {!connected.length ? <p className="integration-note">No authorized accounts yet. Open an influencer’s Overview to connect Instagram. Google, TikTok, and Snapchat connections are managed above.</p> : <div className="vault-grid">{connected.map(account => <article className="panel" key={account.id}><h3>Instagram · @{account.username}</h3><small>{owner(account.influencer_id)} · {account.expired ? 'Authorization expired' : 'Authorized'}</small><p className="muted">Publishing is not implemented yet.</p><label>Publishing policy<select disabled={busy} value={account.publishing_policy} onChange={e => { const policy = e.target.value; run(async () => { await request(`/api/influencers/${account.influencer_id}/instagram/${account.id}`, 'PATCH', { publishing_policy: policy, daily_post_limit: account.daily_post_limit }); setConnected(old => old.map(a => a.id === account.id ? { ...a, publishing_policy: policy } : a)); }); }}><option value="disabled">Disabled</option><option value="approval_required">Require approval (future publishing)</option></select></label><button className="secondary" disabled={busy} onClick={() => { if (window.confirm(`Disconnect @${account.username}? Remove this studio’s saved token?`)) run(async () => { await request(`/api/influencers/${account.influencer_id}/instagram/${account.id}`, 'DELETE'); setConnected(old => old.filter(a => a.id !== account.id)); }); }}>Disconnect</button></article>)}</div>}
