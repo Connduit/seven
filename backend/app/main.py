@@ -163,3 +163,59 @@ async def draft(influencer_id: int, payload: Prompt, session: Session = Depends(
     session.commit()
     session.refresh(result)
     return result
+
+
+class SocialPage(Base):
+    __tablename__ = "social_pages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    influencer_id: Mapped[int] = mapped_column(ForeignKey("influencers.id"), index=True)
+    platform: Mapped[str]
+    url: Mapped[str]
+
+
+SocialPage.__table__.create(engine, checkfirst=True)
+
+
+class SocialPageInput(BaseModel):
+    platform: Literal["Instagram", "TikTok", "YouTube", "X", "Bluesky", "Reddit"]
+    url: str = Field(min_length=1, max_length=2048)
+
+
+class SocialPageOutput(SocialPageInput):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+
+
+@app.get("/api/influencers/{influencer_id}/social-pages", response_model=list[SocialPageOutput])
+def social_pages(influencer_id: int, session: Session = Depends(db)):
+    find(session, influencer_id)
+    return list(session.scalars(select(SocialPage).where(SocialPage.influencer_id == influencer_id).order_by(SocialPage.id)))
+
+
+@app.post("/api/influencers/{influencer_id}/social-pages", response_model=SocialPageOutput, status_code=201)
+def add_social_page(influencer_id: int, payload: SocialPageInput, session: Session = Depends(db)):
+    from urllib.parse import urlsplit
+    find(session, influencer_id)
+    hosts = {"Instagram": ["instagram.com"], "TikTok": ["tiktok.com"], "YouTube": ["youtube.com"], "X": ["x.com", "twitter.com"], "Bluesky": ["bsky.app"], "Reddit": ["reddit.com"]}
+    try:
+        parsed = urlsplit(payload.url)
+        host = (parsed.hostname or "").removeprefix("www.")
+        valid = parsed.scheme == "https" and host in hosts[payload.platform] and not parsed.username and not parsed.password and parsed.port in (None, 443) and parsed.path.strip('/')
+    except ValueError:
+        valid = False
+    if not valid:
+        raise HTTPException(422, "Enter an HTTPS profile URL for the selected platform.")
+    page = SocialPage(influencer_id=influencer_id, **payload.model_dump())
+    session.add(page)
+    session.commit()
+    session.refresh(page)
+    return page
+
+
+@app.delete("/api/influencers/{influencer_id}/social-pages/{page_id}", status_code=204)
+def remove_social_page(influencer_id: int, page_id: int, session: Session = Depends(db)):
+    page = session.get(SocialPage, page_id)
+    if not page or page.influencer_id != influencer_id:
+        raise HTTPException(404, "Social page not found")
+    session.delete(page)
+    session.commit()

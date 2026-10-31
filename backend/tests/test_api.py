@@ -56,3 +56,21 @@ def test_inference_failure_is_atomic(client, monkeypatch):
     url = f"/api/influencers/{item['id']}"
     assert client.post(url+'/chat', json={'content':'Hello'}).status_code == 503
     assert client.get(url+'/entries').json() == []
+
+
+def test_social_pages_are_persisted_and_isolated(client):
+    first, second = create(client), create(client, 'Jake')
+    url = f"/api/influencers/{first['id']}/social-pages"
+    payload = {'platform': 'Instagram', 'url': 'https://www.instagram.com/maya/'}
+    result = client.post(url, json=payload)
+    assert result.status_code == 201
+    page = result.json()
+    assert client.get(url).json() == [page]
+    other = f"/api/influencers/{second['id']}/social-pages"
+    assert client.get(other).json() == []
+    assert client.delete(other + f"/{page['id']}").status_code == 404
+    for bad in ['javascript:alert(1)', 'https://instagram.com.evil.test/maya', 'http://instagram.com/maya', 'https://instagram.com']:
+        assert client.post(url, json={**payload, 'url': bad}).status_code == 422
+    assert client.delete(url + f"/{page['id']}").status_code == 204
+    assert client.get(url).json() == []
+    assert client.get('/api/influencers/999/social-pages').status_code == 404

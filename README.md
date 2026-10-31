@@ -48,3 +48,7 @@ npm run build
 ```
 
 API tests use isolated in-memory databases and a deterministic inference stub; they do not claim to validate a live LLM. See [PROJECT_SPEC.md](PROJECT_SPEC.md) for the full roadmap.
+
+## Influencer profiles
+
+Click a character card to open Overview: personality, interests, primary goal, status, studio message/draft counts, and last activity. Add or remove saved HTTPS profile links for Instagram, TikTok, YouTube, X, Bluesky, and Reddit. These are public links, not authenticated account connections. Audience analytics remain unavailable until platform integrations exist. The social page table is created automatically on backend startup; existing characters and histories are preserved.
