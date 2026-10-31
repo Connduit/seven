@@ -219,3 +219,26 @@ def remove_social_page(influencer_id: int, page_id: int, session: Session = Depe
         raise HTTPException(404, "Social page not found")
     session.delete(page)
     session.commit()
+
+
+class StatusInput(BaseModel):
+    status: Literal["paused", "active", "archived"]
+
+
+@app.patch("/api/influencers/{influencer_id}/status", response_model=InfluencerOutput)
+def change_status(influencer_id: int, payload: StatusInput, session: Session = Depends(db)):
+    item = find(session, influencer_id)
+    item.status = payload.status
+    session.commit()
+    session.refresh(item)
+    return item
+
+
+@app.delete("/api/influencers/{influencer_id}", status_code=204)
+def delete_influencer(influencer_id: int, session: Session = Depends(db)):
+    from sqlalchemy import delete
+    item = find(session, influencer_id)
+    session.execute(delete(Entry).where(Entry.influencer_id == influencer_id))
+    session.execute(delete(SocialPage).where(SocialPage.influencer_id == influencer_id))
+    session.delete(item)
+    session.commit()

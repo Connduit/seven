@@ -74,3 +74,24 @@ def test_social_pages_are_persisted_and_isolated(client):
     assert client.delete(url + f"/{page['id']}").status_code == 204
     assert client.get(url).json() == []
     assert client.get('/api/influencers/999/social-pages').status_code == 404
+
+
+def test_tile_status_and_deletion(client):
+    item, survivor = create(client), create(client, 'Jake')
+    url = f"/api/influencers/{item['id']}"
+    for status in ['active', 'paused', 'archived', 'paused']:
+        result = client.patch(url+'/status', json={'status':status})
+        assert result.status_code == 200
+        assert result.json()['status'] == status
+        assert result.json()['personality'] == item['personality']
+    assert client.patch(url+'/status', json={'status':'invalid'}).status_code == 422
+    client.post(url+'/chat', json={'content':'Hello'})
+    client.post(url+'/drafts', json={'content':'Hello'})
+    client.post(url+'/social-pages', json={'platform':'X','url':'https://x.com/maya'})
+    assert client.delete(url).status_code == 204
+    assert client.delete(url).status_code == 404
+    assert client.get('/api/influencers').json() == [survivor]
+    # Check actual child rows, not just endpoints that reject the missing parent.
+    with next(main.app.dependency_overrides[main.db]()) as session:
+        assert list(session.scalars(main.select(main.Entry))) == []
+        assert list(session.scalars(main.select(main.SocialPage))) == []
