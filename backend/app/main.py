@@ -174,7 +174,7 @@ SocialPage.__table__.create(engine, checkfirst=True)
 
 
 class SocialPageInput(BaseModel):
-    platform: Literal["Instagram", "TikTok", "YouTube", "X", "Bluesky", "Reddit"]
+    platform: Literal["Instagram", "TikTok", "YouTube", "X", "Bluesky", "Reddit", "Snapchat"]
     url: str = Field(min_length=1, max_length=2048)
 
 
@@ -193,7 +193,7 @@ def social_pages(influencer_id: int, session: Session = Depends(db)):
 def add_social_page(influencer_id: int, payload: SocialPageInput, session: Session = Depends(db)):
     from urllib.parse import urlsplit
     find(session, influencer_id)
-    hosts = {"Instagram": ["instagram.com"], "TikTok": ["tiktok.com"], "YouTube": ["youtube.com"], "X": ["x.com", "twitter.com"], "Bluesky": ["bsky.app"], "Reddit": ["reddit.com"]}
+    hosts = {"Instagram": ["instagram.com"], "TikTok": ["tiktok.com"], "YouTube": ["youtube.com"], "X": ["x.com", "twitter.com"], "Bluesky": ["bsky.app"], "Reddit": ["reddit.com"], "Snapchat": ["snapchat.com"]}
     try:
         parsed = urlsplit(payload.url)
         host = (parsed.hostname or "").removeprefix("www.")

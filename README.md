@@ -51,7 +51,7 @@ API tests use isolated in-memory databases and a deterministic inference stub; t
 
 ## Influencer profiles
 
-Click a character card to open Overview: personality, interests, primary goal, status, studio message/draft counts, and last activity. Add or remove saved HTTPS profile links for Instagram, TikTok, YouTube, X, Bluesky, and Reddit. These are public links, not authenticated account connections. Audience analytics remain unavailable until platform integrations exist. The social page table is created automatically on backend startup; existing characters and histories are preserved.
+Click a character card to open Overview: personality, interests, primary goal, status, studio message/draft counts, and last activity. Add or remove saved HTTPS profile links for Instagram, TikTok, YouTube, X, Bluesky, Reddit, and Snapchat. These are public links, not authenticated account connections. Audience analytics remain unavailable until platform integrations exist. The social page table is created automatically on backend startup; existing characters and histories are preserved.
 
 ## Instagram account authorization (initial integration)
 
@@ -90,3 +90,5 @@ Use this initial vault only in a trusted single-user environment behind HTTPS or
 Creator chat and caption drafts share character instructions in `backend/app/prompts.py`. Personas speak in first person with their configured traits and interests, avoiding routine assistant/AI disclaimers. They answer direct questions about being fictional truthfully and distinguish imagined scenes or proposed captions from real events and completed actions. Draft generation does not publish content or establish that a fictional trip happened. Existing profile transparency labels remain visible. Restart the backend to apply changes; no model retraining or database migration is needed.
 
 Tests verify the instructions and isolated character context sent to the inference API using a mock HTTP transport. Actual writing style and adherence depend on your model; test your local llama.cpp server with ordinary conversation, a beach-caption request, and direct questions such as “Are you a real human?” and “Did that trip actually happen?”. Structured storyline memory and a post approval queue remain future work.
+
+Snapchat supports saved public profile links (for example `https://www.snapchat.com/add/yourusername`) and encrypted vault credentials. Snapchat OAuth, analytics, and publishing are not implemented.
