@@ -211,3 +211,68 @@ def test_instagram_exchange_protocol(monkeypatch, instagram_config):
     account_id, username, token, expiry = asyncio.run(instagram.exchange('code'))
     assert (account_id, username, token) == ('123','maya','long-token')
     assert len(calls) == 3
+
+
+def test_vault_credentials_encryption_and_access(client, instagram_config):
+    from app.vault import VaultAccount
+    from cryptography.fernet import Fernet
+    import os
+    item = create(client)
+    payload = dict(label="Maya's Gmail", service='Gmail', website='https://accounts.google.com',
+                   influencer_id=item['id'], username='maya@example.com', password='  secret-password  ')
+    base = '/api/accounts/vault'
+    assert client.get(base).status_code == 401
+    assert client.post(base, json=payload).status_code == 401
+    response = client.post(base, json=payload, headers=instagram_config)
+    assert response.status_code == 201
+    metadata = response.json()
+    assert 'password' not in metadata and 'username' not in metadata
+    url = f"{base}/{metadata['id']}"
+    listed = client.get(base, headers=instagram_config)
+    assert listed.json() == [metadata]
+    assert listed.headers['Cache-Control'] == 'no-store'
+    assert 'secret-password' not in listed.text
+    for session in main.app.dependency_overrides[main.db]():
+        stored = session.get(VaultAccount, metadata['id'])
+        assert payload['username'] not in stored.encrypted_username
+        assert payload['password'] not in stored.encrypted_password
+        assert Fernet(os.environ['TOKEN_ENCRYPTION_KEY'].encode()).decrypt(stored.encrypted_password.encode()).decode() == payload['password']
+    assert client.post(url+'/reveal').status_code == 401
+    assert client.get(url+'/edit').status_code == 401
+    assert client.put(url, json=payload).status_code == 401
+    assert client.delete(url).status_code == 401
+    revealed = client.post(url+'/reveal', headers=instagram_config)
+    assert revealed.json() == {'username':payload['username'], 'password':payload['password']}
+    assert revealed.headers['Cache-Control'] == 'no-store'
+    edit = client.get(url+'/edit', headers=instagram_config).json()
+    assert edit['username'] == payload['username'] and 'password' not in edit
+    # An empty edit password preserves the original, including surrounding spaces.
+    assert client.put(url, json={**payload, 'password':'', 'label':'Updated'}, headers=instagram_config).status_code == 200
+    assert client.post(url+'/reveal', headers=instagram_config).json()['password'] == payload['password']
+    assert client.put(url, json={**payload, 'password':'replacement'}, headers=instagram_config).status_code == 200
+    assert client.post(url+'/reveal', headers=instagram_config).json()['password'] == 'replacement'
+    # Influencer deletion unassigns credentials rather than destroying access to a provider account.
+    assert client.delete(f"/api/influencers/{item['id']}").status_code == 401
+    assert client.delete(f"/api/influencers/{item['id']}", headers=instagram_config).status_code == 204
+    assert client.get(base, headers=instagram_config).json()[0]['influencer_id'] is None
+    assert client.delete(url, headers=instagram_config).status_code == 204
+    assert client.post(url+'/reveal', headers=instagram_config).status_code == 404
+
+
+def test_vault_validation_redaction_and_wrong_key(client, monkeypatch, instagram_config):
+    from cryptography.fernet import Fernet
+    base = '/api/accounts/vault'
+    payload = dict(label='Gmail', service='Gmail', username='user', password='private-password')
+    invalid = client.post(base, json={**payload, 'website':'javascript:alert(1)'}, headers=instagram_config)
+    assert invalid.status_code == 422
+    assert 'private-password' not in invalid.text
+    assert invalid.headers['Cache-Control'] == 'no-store'
+    assert client.post(base, json={**payload, 'password':''}, headers=instagram_config).status_code == 422
+    assert client.post(base, json={**payload, 'influencer_id':999}, headers=instagram_config).status_code == 404
+    saved = client.post(base, json=payload, headers=instagram_config).json()
+    monkeypatch.setenv('TOKEN_ENCRYPTION_KEY', Fernet.generate_key().decode())
+    response = client.post(f"{base}/{saved['id']}/reveal", headers=instagram_config)
+    assert response.status_code == 503
+    assert 'private-password' not in response.text
+    monkeypatch.delenv('TOKEN_ENCRYPTION_KEY')
+    assert client.get(base, headers=instagram_config).status_code == 503

@@ -68,6 +68,8 @@ def configuration():
 
 def admin(x_studio_key: str = Header(default='')):
     expected = os.getenv('STUDIO_ADMIN_KEY', '')
+    if expected and len(expected) < 32:
+        raise HTTPException(503, 'Configure a studio administrator key of at least 32 characters.')
     if not expected or not secrets.compare_digest(x_studio_key, expected):
         raise HTTPException(401, 'Enter the studio administrator key to manage connected accounts.')
 

@@ -238,13 +238,16 @@ def change_status(influencer_id: int, payload: StatusInput, session: Session = D
 def delete_influencer(influencer_id: int, session: Session = Depends(db), x_studio_key: str = Header(default='')):
     from sqlalchemy import delete
     item = find(session, influencer_id)
-    if session.scalar(select(InstagramConnection).where(InstagramConnection.influencer_id == influencer_id)):
+    if (session.scalar(select(InstagramConnection).where(InstagramConnection.influencer_id == influencer_id))
+            or session.scalar(select(VaultAccount).where(VaultAccount.influencer_id == influencer_id))):
         from .instagram import admin
         admin(x_studio_key)
     session.execute(delete(Entry).where(Entry.influencer_id == influencer_id))
     session.execute(delete(SocialPage).where(SocialPage.influencer_id == influencer_id))
     session.execute(delete(InstagramConnection).where(InstagramConnection.influencer_id == influencer_id))
     session.execute(delete(OAuthAttempt).where(OAuthAttempt.influencer_id == influencer_id))
+    for account in session.scalars(select(VaultAccount).where(VaultAccount.influencer_id == influencer_id)):
+        account.influencer_id = None
     session.delete(item)
     session.commit()
 
@@ -252,3 +255,31 @@ def delete_influencer(influencer_id: int, session: Session = Depends(db), x_stud
 from .instagram import router as instagram_router, InstagramConnection, OAuthAttempt
 Base.metadata.create_all(engine)
 app.include_router(instagram_router)
+
+
+from .vault import router as vault_router, VaultAccount
+Base.metadata.create_all(engine)
+app.include_router(vault_router)
+
+
+# Validation failures for credential routes must never echo submitted passwords.
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi.exception_handlers import request_validation_exception_handler
+
+
+@app.exception_handler(RequestValidationError)
+async def safe_validation_errors(request, exc):
+    if request.url.path.startswith('/api/accounts/'):
+        return JSONResponse(status_code=422, content={'detail': 'Invalid account details. Check required fields, field lengths, and the HTTPS website URL.'})
+    return await request_validation_exception_handler(request, exc)
+
+
+@app.middleware('http')
+async def credential_response_headers(request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith('/api/accounts/'):
+        response.headers['Cache-Control'] = 'no-store'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Referrer-Policy'] = 'no-referrer'
+    return response
