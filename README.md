@@ -55,7 +55,7 @@ Click a character card to open Overview: personality, interests, primary goal, s
 
 ## Instagram account authorization (initial integration)
 
-Instagram is the first OAuth adapter; other platforms remain public profile links. This uses Instagram API with Instagram Login for professional Business/Creator accounts. No social passwords are collected. Tokens are encrypted with Fernet before SQLite persistence and are never returned to the browser. An expiring, single-use state and HttpOnly browser cookie bind each authorization to its initiating browser and influencer.
+Instagram OAuth is available alongside Google, TikTok, and Snapchat identity linking described below. Other platforms remain public profile links. This uses Instagram API with Instagram Login for professional Business/Creator accounts. No social passwords are collected. Tokens are encrypted with Fernet before SQLite persistence and are never returned to the browser. An expiring, single-use state and HttpOnly browser cookie bind each authorization to its initiating browser and influencer.
 
 1. Create a Meta developer app and configure **Instagram API with Instagram Login**. Follow Meta's current [Business Login documentation](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/business-login/). Request `instagram_business_basic` and `instagram_business_content_publish`. Development mode generally requires assigned test/app roles; access for other users requires Meta's applicable review and permissions.
 2. Serve the frontend and `/api` through **one HTTPS origin** (including for local OAuth testing), and register the exact callback `https://YOUR-HOST/api/integrations/instagram/callback` in the app configuration. The OAuth cookie requires HTTPS. Configure your reverse proxy to route `/api` to FastAPI and all other paths to the frontend. Keep the local development servers private; Vite's default development host rules must explicitly allow your chosen host if proxying to Vite. Do not disable host validation globally.
@@ -81,7 +81,7 @@ The **Accounts & vault** navigation item manages saved credentials for Gmail, so
 
 Unlock using the studio key, add a service and account label, enter the username/email and password, and optionally assign an influencer. Both username and password are encrypted before storage; labels, service names, website links, and assignment IDs are metadata stored without encryption. List APIs do not return usernames or passwords. Reveal explicitly displays credentials for 30 seconds; the vault clears its UI and in-memory administrator key when manually locked or after 5 minutes of inactivity. Switching browser tabs does not lock the vault. Editing permits password replacement; leaving the new password blank preserves the existing password. Deleting a saved entry removes it from the current database, not from the provider or old backups. Deleting an assigned influencer requires the administrator key and preserves saved credentials as unassigned workspace accounts.
 
-These are **saved credentials, not active connections**. The AI cannot retrieve them and they are never added to model prompts or used to automate logins. Gmail/Google OAuth is not implemented. Use official platform OAuth APIs for future email/social automation, including Gmail; storing a Google password does not bypass 2FA or authorize Gmail API access. Existing authorized Instagram connections can be reviewed, disconnected, and assigned a future approval policy from this page.
+These are **saved credentials, not active connections**. The AI cannot retrieve them and they are never added to model prompts or used to automate logins. Google identity OAuth is available below; Gmail API access is not implemented. Use official platform OAuth APIs for future email/social automation, including Gmail; storing a Google password does not bypass 2FA or authorize Gmail API access. Existing authorized Instagram connections can be reviewed, disconnected, and assigned a future approval policy from this page.
 
 Use this initial vault only in a trusted single-user environment behind HTTPS or on local loopback. It has administrator-key authentication and encryption at rest, not full user accounts, hardware-backed key storage, enterprise auditing, or security review. The encryption key must remain separate from database backups and stable across restarts. A compromised server or browser can still expose unlocked credentials. For valuable production credentials, prefer an established password manager until this application has undergone authentication hardening and independent security review. Do not send passwords or encryption keys in chat.
 
@@ -91,4 +91,41 @@ Creator chat and caption drafts share character instructions in `backend/app/pro
 
 Tests verify the instructions and isolated character context sent to the inference API using a mock HTTP transport. Actual writing style and adherence depend on your model; test your local llama.cpp server with ordinary conversation, a beach-caption request, and direct questions such as “Are you a real human?” and “Did that trip actually happen?”. Structured storyline memory and a post approval queue remain future work.
 
-Snapchat supports saved public profile links (for example `https://www.snapchat.com/add/yourusername`) and encrypted vault credentials. Snapchat OAuth, analytics, and publishing are not implemented.
+Snapchat supports saved public profile links (for example `https://www.snapchat.com/add/yourusername`) and encrypted vault credentials. Snapchat Login Kit identity linking is available below; analytics and publishing are not implemented.
+
+## Google, TikTok, and Snapchat account linking
+
+These three providers can be authorized independently of Meta. In **Accounts & vault**, unlock the vault, choose an influencer under **Google, TikTok & Snapchat**, then select Connect. Each provider is enabled only when its own app configuration is present. Tokens and available refresh tokens are encrypted at rest and never included in model prompts, account-list responses, or callback URLs. Only basic identity scopes are requested; linking does not enable posting, Gmail, Google Drive, YouTube operations, or Snapchat chats/Stories.
+
+Keep `STUDIO_ADMIN_KEY` and `TOKEN_ENCRYPTION_KEY` unchanged. Add provider values to `backend/.env` using `backend/.env.example`; never commit actual secrets. Start the backend with `--env-file .env --no-access-log` as above. OAuth callbacks must be routed to FastAPI through the frontend origin. `STUDIO_FRONTEND_URL` and each configured provider callback must use the same origin. To use all providers together, use one restricted HTTPS deployment; Google alone also supports local loopback HTTP.
+
+### Google — start here for local testing
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/) and create/select a project. Configure **Google Auth Platform / OAuth consent** (branding, audience, and test users as applicable).
+2. Create an **OAuth client ID** of type **Web application**. Register the exact authorized redirect URI below. You do not need Gmail API access for this identity-only connection.
+3. Set:
+
+   ```dotenv
+   GOOGLE_CLIENT_ID=your-web-client-id
+   GOOGLE_CLIENT_SECRET=your-web-client-secret
+   GOOGLE_REDIRECT_URI=http://localhost:5173/api/integrations/google/callback
+   STUDIO_FRONTEND_URL=http://localhost:5173
+   ```
+
+4. Run Vite on port 5173 and FastAPI on 8000. Open the dashboard at **http://localhost:5173** (not `127.0.0.1` if you registered `localhost`), unlock Accounts & vault, select an influencer, and Connect Google. The scopes are `openid email profile`; no email messages are read or sent. Register a matching HTTPS callback and update both URLs for deployment. See [Google server-side OAuth documentation](https://developers.google.com/identity/protocols/oauth2/web-server).
+
+### TikTok
+
+1. Create an app at [TikTok for Developers](https://developers.tiktok.com/), configure **Login Kit for Web**, and register your exact HTTPS redirect URI. Configure approved test users/sandbox or obtain approval as required by TikTok.
+2. Set `TIKTOK_CLIENT_ID` to TikTok's **client key**, `TIKTOK_CLIENT_SECRET` to its client secret, and `TIKTOK_REDIRECT_URI=https://YOUR-HOST/api/integrations/tiktok/callback`. Set `STUDIO_FRONTEND_URL=https://YOUR-HOST`.
+3. Connect from the vault. This requests `user.info.basic` and retrieves basic profile identity. It does not request Content Posting API permissions. [TikTok Login Kit documentation](https://developers.tiktok.com/doc/login-kit-web/).
+
+### Snapchat
+
+1. Create an app in the [Snap developer portal](https://developers.snap.com/), enable **Login Kit**, register an exact HTTPS redirect URI, and configure development/test accounts or production approval as applicable.
+2. Set `SNAPCHAT_CLIENT_ID`, `SNAPCHAT_CLIENT_SECRET`, and `SNAPCHAT_REDIRECT_URI=https://YOUR-HOST/api/integrations/snapchat/callback`. Set `STUDIO_FRONTEND_URL=https://YOUR-HOST`.
+3. Connect from the vault. This uses Login Kit's display-name identity access; Snapchat publishing and messaging are separate capabilities and are not implemented. [Snap Login Kit documentation](https://developers.snap.com/snap-kit/login-kit/Tutorials/web).
+
+The authorization flow uses provider-scoped, short-lived state, a browser-bound HttpOnly cookie, and PKCE. One provider account may be assigned to only one influencer; reconnecting that same influencer updates its saved tokens. Disconnect deletes local tokens only; revoke the app at the provider to fully revoke its grant. Deleting an influencer requires the studio administrator key when it owns a connection and removes those tokens and pending authorizations. Token refresh scheduling is not implemented; reconnect expired accounts. If you rotate the encryption key, pending callbacks must be restarted and previously encrypted tokens require the original key.
+
+Live connections still require your developer apps and provider configuration. Tests cover mocked OAuth/token/profile responses, not live provider approval or successful production login. The cloud network policy blocked access to the current provider documentation during development; verify the linked provider setup requirements before live use. Required outbound hosts: `accounts.google.com`, `oauth2.googleapis.com`, `openidconnect.googleapis.com`, `www.tiktok.com`, `open.tiktokapis.com`, `accounts.snapchat.com`, and `kit.snapchat.com`.

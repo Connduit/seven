@@ -236,13 +236,16 @@ def delete_influencer(influencer_id: int, session: Session = Depends(db), x_stud
     from sqlalchemy import delete
     item = find(session, influencer_id)
     if (session.scalar(select(InstagramConnection).where(InstagramConnection.influencer_id == influencer_id))
-            or session.scalar(select(VaultAccount).where(VaultAccount.influencer_id == influencer_id))):
+            or session.scalar(select(VaultAccount).where(VaultAccount.influencer_id == influencer_id))
+            or session.scalar(select(LinkedAccount).where(LinkedAccount.influencer_id == influencer_id))):
         from .instagram import admin
         admin(x_studio_key)
     session.execute(delete(Entry).where(Entry.influencer_id == influencer_id))
     session.execute(delete(SocialPage).where(SocialPage.influencer_id == influencer_id))
     session.execute(delete(InstagramConnection).where(InstagramConnection.influencer_id == influencer_id))
     session.execute(delete(OAuthAttempt).where(OAuthAttempt.influencer_id == influencer_id))
+    session.execute(delete(LinkedAccount).where(LinkedAccount.influencer_id == influencer_id))
+    session.execute(delete(LinkAttempt).where(LinkAttempt.influencer_id == influencer_id))
     for account in session.scalars(select(VaultAccount).where(VaultAccount.influencer_id == influencer_id)):
         account.influencer_id = None
     session.delete(item)
@@ -280,3 +283,8 @@ async def credential_response_headers(request, call_next):
         response.headers['Pragma'] = 'no-cache'
         response.headers['Referrer-Policy'] = 'no-referrer'
     return response
+
+
+from .oauth import router as oauth_router, LinkedAccount, LinkAttempt
+Base.metadata.create_all(engine)
+app.include_router(oauth_router)

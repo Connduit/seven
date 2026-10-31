@@ -44,7 +44,7 @@ function initialTheme(): Theme {
 const startingTheme = initialTheme();
 document.documentElement.dataset.theme = startingTheme;
 function App() {
-  const [view, setView] = useState<'influencers' | 'accounts'>('influencers');
+  const [view, setView] = useState<'influencers' | 'accounts'>(() => new URLSearchParams(window.location.search).has('oauth') ? 'accounts' : 'influencers');
   const [theme, setTheme] = useState<Theme>(startingTheme);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
