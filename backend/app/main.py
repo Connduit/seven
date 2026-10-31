@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Literal
 
 import httpx
+from .prompts import character_instructions
 from fastapi import FastAPI, Depends, HTTPException, Header
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import create_engine, ForeignKey, String, Text, select
@@ -85,11 +86,7 @@ def history(session, influencer_id, kind):
 
 
 async def generate(item, messages):
-    identity = (
-        f"You are {item.name}, a transparently fictional AI character. "
-        f"Personality: {item.personality}. Interests: {item.interests}. Goal: {item.goal}. "
-        "Stay consistent with your character. You cannot publish posts or spend money."
-    )
+    identity = character_instructions(item)
     try:
         async with httpx.AsyncClient(timeout=90, trust_env=False) as client:
             response = await client.post(
