@@ -152,3 +152,24 @@ Access and refresh tokens remain encrypted in SQLite. A renewal response that om
 Transient network/rate-limit/server errors use delayed retries; a revoked/expired offline grant (`invalid_grant`) stops renewal and shows Reconnect. Invalid server credentials or encryption settings show a configuration error rather than asking you to repeatedly authorize. Missing offline grants require one reconnection. Google may revoke or expire grants independently of the normal one-hour access-token lifetime, so automatic refresh cannot guarantee permanent access.
 
 The dashboard distinguishes access-token expiry from account authorization, shows automatic-renewal status, and polls linked accounts once per minute while the vault is open. Only Google automatic refresh is implemented; Instagram, TikTok and Snapchat still require their existing reconnect flows. No Gmail access, publishing scopes, or autonomous posting capabilities are added by refresh. Tests use mocked Google token responses; your actual local Google grant must be checked after deployment.
+
+## Public website for developer app registration
+
+The public homepage, Terms of Service, Privacy Policy, and app icon live in `frontend/public-site/`. They have their own static build and do not import the dashboard, call the backend, collect credentials, or load third-party fonts/analytics. The dashboard remains at its existing private development address. Do not publish the dashboard or its API simply to give TikTok a website URL.
+
+1. Set your **public** operator name, support/privacy contact email, HTTPS website origin, and policy date in `frontend/public-site/site.config.json`. These details are meant to be public; never put API keys or passwords in that file. Review the policy text against your deployment and actual data practices before publication.
+2. From `frontend`, run `npm run build:public` for a local configuration preview. Missing details produce a visible preview notice and noindex metadata. Run `npm run build:public:release` for publication; it fails if the operator name, email, or website origin are missing. The normal `npm run build` continues to build the private dashboard separately.
+3. Upload **only the contents of `frontend/dist-public/`** to a static HTTPS host at the root of your public domain. No backend, SPA fallback, environment file, or authentication is needed for these informational pages. Do not upload the repository, `backend/`, `.env`, `frontend/dist/`, `public-site/site.config.json`, or your database. An Nginx static-host example is in `deploy/public-site.nginx.conf`; it must be adapted to your host and TLS configuration. Managed static hosting works too.
+4. Open the real deployed URLs and check that each is public and readable, then enter them in TikTok:
+
+   ```text
+   Web/Desktop URL:       https://YOUR-PUBLIC-DOMAIN/
+   Terms of Service URL:  https://YOUR-PUBLIC-DOMAIN/terms/
+   Privacy Policy URL:    https://YOUR-PUBLIC-DOMAIN/privacy/
+   ```
+
+5. Upload `frontend/public-site/assets/app-icon.png` as the app icon if TikTok accepts its 512×512 PNG format, or follow the portal's stated dimensions. The SVG source is alongside it. The icon is also served at `/assets/app-icon.png` on the public site.
+
+A public website is separate from the private studio's OAuth redirect. You may use a public homepage such as `https://www.YOUR-DOMAIN/` while hosting a restricted dashboard and its `/api` callback at `https://studio.YOUR-DOMAIN/`. `STUDIO_FRONTEND_URL` and OAuth redirect origins must match **the private dashboard**, not the public marketing website. TikTok may require domain verification, app review, and other setup even with these pages present; publication does not guarantee approval.
+
+No domain, hosting account, public support email, or legal operator is assumed. This task prepares files; it does not provision hosting, publish a website, or provide live URLs. You must configure the details and deploy the release output before using these links in developer portals. Policy drafts are based on current application behavior and need operator review before publication. To verify build isolation locally, run `node --test scripts/build-public.test.mjs` from `frontend`.
