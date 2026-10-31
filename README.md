@@ -52,3 +52,25 @@ API tests use isolated in-memory databases and a deterministic inference stub; t
 ## Influencer profiles
 
 Click a character card to open Overview: personality, interests, primary goal, status, studio message/draft counts, and last activity. Add or remove saved HTTPS profile links for Instagram, TikTok, YouTube, X, Bluesky, and Reddit. These are public links, not authenticated account connections. Audience analytics remain unavailable until platform integrations exist. The social page table is created automatically on backend startup; existing characters and histories are preserved.
+
+## Instagram account authorization (initial integration)
+
+Instagram is the first OAuth adapter; other platforms remain public profile links. This uses Instagram API with Instagram Login for professional Business/Creator accounts. No social passwords are collected. Tokens are encrypted with Fernet before SQLite persistence and are never returned to the browser. An expiring, single-use state and HttpOnly browser cookie bind each authorization to its initiating browser and influencer.
+
+1. Create a Meta developer app and configure **Instagram API with Instagram Login**. Follow Meta's current [Business Login documentation](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/business-login/). Request `instagram_business_basic` and `instagram_business_content_publish`. Development mode generally requires assigned test/app roles; access for other users requires Meta's applicable review and permissions.
+2. Serve the frontend and `/api` through **one HTTPS origin** (including for local OAuth testing), and register the exact callback `https://YOUR-HOST/api/integrations/instagram/callback` in the app configuration. The OAuth cookie requires HTTPS. Configure your reverse proxy to route `/api` to FastAPI and all other paths to the frontend. Keep the local development servers private; Vite's default development host rules must explicitly allow your chosen host if proxying to Vite. Do not disable host validation globally.
+3. Copy `backend/.env.example` to `backend/.env`. Fill `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET`, `INSTAGRAM_REDIRECT_URI`, and `STUDIO_FRONTEND_URL`. These values must match your Meta app and HTTPS origin. Generate keys locally:
+
+   ```bash
+   .venv/bin/python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+   .venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(32))'
+   ```
+
+   Use the first as `TOKEN_ENCRYPTION_KEY`, the second as `STUDIO_ADMIN_KEY`. Keep them private; do not paste them in chat, commit them, or reuse your Instagram password. Back up the encryption key separately: losing it makes saved tokens unusable. Key rotation and automatic token refresh are not implemented; reconnect expired accounts. `.env` is ignored by Git.
+4. Install the updated `backend/requirements.lock.txt`, then from `backend` run `../.venv/bin/uvicorn app.main:app --env-file .env --port 8000 --no-access-log`. Configure your HTTPS proxy to omit OAuth callback query strings from access logs too (authorization codes and state are sensitive). Use TLS verification normally. Required outbound hosts are `www.instagram.com`, `api.instagram.com`, and `graph.instagram.com`.
+5. Open an influencer's Overview, enter your **studio administrator key**, and click **Connect Instagram**. Authorize on Instagram, then reopen the influencer and unlock settings again. The administrator key lives only in browser memory; refreshing clears it. Instagram authorization returns a token expiry date; reconnect as needed. One Instagram account can belong to only one influencer. Reconnecting resets the publishing policy to Disabled.
+6. Set Disabled or Require creator approval and a future daily post limit. **No publishing API, scheduler, automatic refresh, or autonomous posting is implemented.** These settings are stored configuration, not a working approval queue or publishing control. Disconnect removes the token locally; revoke app access in Instagram settings as well if desired. Deleting a linked influencer requires the studio key and clears its connection credentials.
+
+This remains a trusted single-user local application: the existing character/chat/profile-link APIs do not have full user authentication. The administrator key protects credential-management endpoints, not the entire workspace. Before making it publicly accessible, implement full login/authorization, HTTPS deployment, backups, token refresh, audit logging, and tested publishing/approval enforcement. Do not expose the development server to the Internet just to complete OAuth; use a restricted HTTPS deployment.
+
+OAuth protocol tests use mocked Meta responses; a real account connection requires your app credentials and Meta configuration. Current provider documentation could not be fetched in the cloud due to its network allowlist, so verify your app's current setup requirements in Meta's linked documentation before live use.

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Literal
 
 import httpx
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Header
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import create_engine, ForeignKey, String, Text, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
@@ -235,10 +235,20 @@ def change_status(influencer_id: int, payload: StatusInput, session: Session = D
 
 
 @app.delete("/api/influencers/{influencer_id}", status_code=204)
-def delete_influencer(influencer_id: int, session: Session = Depends(db)):
+def delete_influencer(influencer_id: int, session: Session = Depends(db), x_studio_key: str = Header(default='')):
     from sqlalchemy import delete
     item = find(session, influencer_id)
+    if session.scalar(select(InstagramConnection).where(InstagramConnection.influencer_id == influencer_id)):
+        from .instagram import admin
+        admin(x_studio_key)
     session.execute(delete(Entry).where(Entry.influencer_id == influencer_id))
     session.execute(delete(SocialPage).where(SocialPage.influencer_id == influencer_id))
+    session.execute(delete(InstagramConnection).where(InstagramConnection.influencer_id == influencer_id))
+    session.execute(delete(OAuthAttempt).where(OAuthAttempt.influencer_id == influencer_id))
     session.delete(item)
     session.commit()
+
+
+from .instagram import router as instagram_router, InstagramConnection, OAuthAttempt
+Base.metadata.create_all(engine)
+app.include_router(instagram_router)

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { Sparkles, Plus, Users, MessageSquare, FileText, ArrowUpRight, Moon, Sun } from 'lucide-react';
 import './style.css';
 import Profile from './Profile';
+import { adminHeaders } from './admin';
 
 type Influencer = { id: number; name: string; personality: string; interests: string; goal: string; status: string };
 type Entry = { id: number; kind: string; role: string; content: string; created_at: string };
@@ -26,7 +27,7 @@ function TraitPicker({ title, options, value, onChange }: { title: string; optio
 }
 
 async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
-  const response = await fetch('/api' + path, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const response = await fetch('/api' + path, { method, headers: { 'Content-Type': 'application/json', ...adminHeaders() }, body: body ? JSON.stringify(body) : undefined });
   if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(typeof error.detail === 'string' ? error.detail : 'Request failed. Check your inputs and try again.'); }
   if (response.status === 204) return undefined as T;
   return response.json();
@@ -93,6 +94,7 @@ function App() {
   return <div className="layout"><aside><a className="brand" href="/"><Sparkles/> Studio<span>AI</span></a><div className="workspace">YOUR WORKSPACE</div><div className="nav"><Users size={18}/> Influencers <span>{items.length}</span></div><div className="sidebar-bottom"><div className="avatar">S</div><div>Creator workspace<small>Local development</small></div></div></aside>
     <main><header><span>Workspace <span className="muted">/ Influencers</span></span><div className="header-actions"><span className="pill">Phase 1 · Creator studio</span><button className="theme-toggle" type="button" aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={17}/> : <Moon size={17}/>}<span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span></button></div></header><section className="page"><div className="heading"><div><div className="eyebrow">YOUR CAST, YOUR CREATIVE WORLD</div><h1>Influencer studio<span>.</span></h1><p>Create distinct personalities. Give their stories a place to grow.</p></div><button disabled={busy} onClick={() => {setSelected(null);setEditing(false);setForm(blank);setEditorKey(key => key + 1);}}><Plus size={17}/> New influencer</button></div>
     <div className="stats"><div><span>YOUR CHARACTERS</span><strong>{items.length.toString().padStart(2,'0')}<Users/></strong></div><div><span>ACTIVE CHARACTERS</span><strong>{items.filter(i => i.status === 'active').length.toString().padStart(2,'0')}<Sparkles/></strong></div><div><span>PUBLISHING</span><strong className="smaller">Drafts only<ArrowUpRight/></strong></div></div>
+    {new URLSearchParams(window.location.search).has('instagram') && <p className="integration-note" role="status">{new URLSearchParams(window.location.search).get('instagram') === 'connected' ? 'Instagram connected. Open your influencer and unlock account settings to view it.' : 'Instagram connection was not completed. Try connecting again; the account may already belong to another influencer.'}</p>}
     {error && <div role="alert" className="error">{error}</div>}
     <div className="section-title"><h2>Your influencers</h2><span>Fictional characters · AI generated</span></div>
     <div className="content"><div className="cast">{items.map((i,index) => <article className={'character ' + (i.id === selected ? 'selected' : '')} key={i.id}><button disabled={busy} className="character-open" aria-label={`View ${i.name} profile`} onClick={() => {setSelected(i.id);setTab('overview');setEditing(false);}}><div className={'portrait tone'+index%3}>{i.name.slice(0,1).toUpperCase()}<Sparkles size={18}/></div><div className="card-title"><h3>{i.name}</h3><span className={'status '+i.status}>{i.status}</span></div><p>{i.interests}</p><div className="goal">{i.goal}</div></button><div className="tile-actions">{i.status !== 'archived' && <button className="secondary" disabled={busy} onClick={() => tileAction(i, i.status === 'active' ? 'paused' : 'active')}>{i.status === 'active' ? 'Pause' : 'Resume'}</button>}<button className="secondary" disabled={busy} onClick={() => tileAction(i, i.status === 'archived' ? 'paused' : 'archived')}>{i.status === 'archived' ? 'Restore' : 'Archive'}</button><button className="delete-action" disabled={busy} aria-label={`Delete ${i.name}`} onClick={() => tileAction(i, 'delete')}>Delete</button></div></article>)}{!items.length && <div className="empty"><Users size={30}/><h3>A new cast starts here</h3><p>Create your first fictional influencer to start a conversation and draft content.</p></div>}</div>
