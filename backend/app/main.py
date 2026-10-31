@@ -135,14 +135,19 @@ def history(session, influencer_id, kind):
     return list(session.scalars(select(Entry).where(Entry.influencer_id == influencer_id, Entry.kind == kind).order_by(Entry.id)))
 
 
-async def generate(item, messages):
-    identity = character_instructions(item)
+def inference_payload(item, messages):
+    return {"model": os.getenv("LLM_MODEL", "local"),
+            "messages": [{"role": "system", "content": character_instructions(item)}, *messages],
+            "max_tokens": 600}
+
+
+async def complete(payload):
     try:
         async with httpx.AsyncClient(timeout=90, trust_env=False) as client:
             response = await client.post(
                 os.getenv("LLM_BASE_URL", "http://127.0.0.1:8080/v1").rstrip("/") + "/chat/completions",
                 headers={"Authorization": "Bearer " + os.getenv("LLM_API_KEY", "local")},
-                json={"model": os.getenv("LLM_MODEL", "local"), "messages": [{"role": "system", "content": identity}, *messages], "max_tokens": 600},
+                json=payload,
             )
             response.raise_for_status()
             content = response.json()["choices"][0]["message"]["content"]
@@ -151,6 +156,10 @@ async def generate(item, messages):
             return content
     except (httpx.HTTPError, KeyError, ValueError, IndexError, TypeError):
         raise HTTPException(503, "Inference unavailable. Start llama.cpp and check LLM_BASE_URL and LLM_MODEL.")
+
+
+async def generate(item, messages):
+    return await complete(inference_payload(item, messages))
 
 
 @app.get("/api/health")
@@ -336,7 +345,7 @@ async def safe_validation_errors(request, exc):
 @app.middleware('http')
 async def credential_response_headers(request, call_next):
     response = await call_next(request)
-    if request.url.path.startswith('/api/accounts/'):
+    if request.url.path.startswith('/api/accounts/') or '/debug/' in request.url.path:
         response.headers['Cache-Control'] = 'no-store'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Referrer-Policy'] = 'no-referrer'
@@ -350,3 +359,7 @@ app.include_router(oauth_router)
 
 from .token_refresh import RefreshState
 Base.metadata.create_all(engine)
+
+
+from .debug import router as debug_router
+app.include_router(debug_router)

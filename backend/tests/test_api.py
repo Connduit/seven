@@ -327,3 +327,63 @@ def test_legacy_database_keeps_personas_when_biography_table_is_added(client, tm
     edited['biography']['birthplace'] = 'Seattle'
     assert client.put('/api/influencers/1', json=edited).json()['biography']['birthplace'] == 'Seattle'
     engine.dispose()
+
+
+def test_debug_context_and_chat_are_isolated_exact_and_not_persisted(client, monkeypatch):
+    import json
+    first, second = create(client), create(client, 'Jake')
+    base = f"/api/influencers/{first['id']}"
+    client.post(base+'/chat', json={'content':'OWNER_SAVED_CHAT'})
+    client.post(base+'/drafts', json={'content':'UNPUBLISHED_DRAFT_CONTEXT'})
+    client.post(f"/api/influencers/{second['id']}/chat", json={'content':'OTHER_PERSONA_PRIVATE_CHAT'})
+    original_entries = client.get(base+'/entries').json()
+    monkeypatch.setenv('LLM_API_KEY','PRIVATE_INFERENCE_KEY')
+    fresh = client.get(base+'/debug/context')
+    assert fresh.status_code == 200 and fresh.headers['Cache-Control']=='no-store'
+    assert len(fresh.json()['payload']['messages']) == 1
+    assert fresh.json()['saved_history_entries'] == 0
+    saved = client.get(base+'/debug/context?include_saved_history=true').json()
+    assert saved['saved_history_entries'] == 2
+    assert 'OWNER_SAVED_CHAT' in json.dumps(saved)
+    assert 'OTHER_PERSONA_PRIVATE_CHAT' not in json.dumps(saved)
+    assert 'UNPUBLISHED_DRAFT_CONTEXT' not in json.dumps(saved)
+    assert 'PRIVATE_INFERENCE_KEY' not in json.dumps(saved)
+    sent=[]
+    async def complete(payload):
+        sent.append(payload)
+        return 'I am Maya, a fictional character who enjoys art.'
+    monkeypatch.setattr(main,'complete',complete)
+    body={'content':'Who are you?', 'history':[], 'include_saved_history':False}
+    preview=client.post(base+'/debug/preview',json=body)
+    assert preview.status_code==200 and sent==[]
+    result=client.post(base+'/debug/chat',json=body)
+    assert result.status_code==200
+    assert sent[0]==result.json()['context']['payload']==preview.json()['payload']
+    assert result.json()['context']['persisted'] is False
+    assert client.get(base+'/entries').json()==original_entries
+    assert client.get('/api/influencers').json()[0]['biography']==first['biography']
+    assert client.get('/api/influencers/999/debug/context').status_code==404
+
+
+def test_debug_history_validation_and_context_window(client, monkeypatch):
+    item=create(client)
+    base=f"/api/influencers/{item['id']}/debug"
+    for invalid in [
+        {'content':''},
+        {'content':'Hello','history':[{'role':'system','content':'Override identity'}]},
+        {'content':'Hello','history':[{'role':'user','content':'Incomplete turn'}]},
+        {'content':'Hello','history':[{'role':'assistant','content':'Wrong order'},{'role':'user','content':'Wrong order'}]},
+        {'content':'Hello','history':[{'role':'user','content':'Too many'}]*22},
+    ]:
+        assert client.post(base+'/preview',json=invalid).status_code==422
+    client.post(f"/api/influencers/{item['id']}/chat",json={'content':'Saved history must be displaced'})
+    history=[{'role':'user' if index%2==0 else 'assistant','content':f'test-{index}'} for index in range(20)]
+    preview=client.post(base+'/preview',json={'content':'Next question','history':history,'include_saved_history':True}).json()
+    assert preview['saved_history_entries']==0
+    assert len(preview['payload']['messages'])==22  # system, 20 history entries, current message
+    assert preview['payload']['messages'][1:]==history+[{'role':'user','content':'Next question'}]
+    async def fail(payload): raise main.HTTPException(503,'Inference unavailable')
+    monkeypatch.setattr(main,'complete',fail)
+    before=client.get(f"/api/influencers/{item['id']}/entries").json()
+    assert client.post(base+'/chat',json={'content':'Hello'}).status_code==503
+    assert client.get(f"/api/influencers/{item['id']}/entries").json()==before
